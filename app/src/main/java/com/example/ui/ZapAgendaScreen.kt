@@ -1,10 +1,13 @@
 package com.example.ui
 
+import android.content.Context
 import android.widget.Toast
 import androidx.compose.animation.*
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -20,11 +23,18 @@ import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.runtime.saveable.rememberSaveable
+import org.json.JSONArray
+import org.json.JSONObject
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -66,97 +76,181 @@ fun ZapAgendaScreen(
     var showAddDialog by remember { mutableStateOf(false) }
     var contactToEdit by remember { mutableStateOf<Contact?>(null) }
 
-    Scaffold(
-        modifier = modifier.fillMaxSize(),
-        topBar = {
-            CenterAlignedTopAppBar(
-                title = {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(32.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(MaterialTheme.colorScheme.primaryContainer),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Person,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "ZapAgenda",
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 0.5.sp,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                },
-                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background
-                )
-            )
-        },
-        bottomBar = {
-            // High fidelity bottom bar to match the "Clean Minimalism" layout structure exactly
-            NavigationBar(
-                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.8f),
-                tonalElevation = 0.dp,
-                modifier = Modifier.windowInsetsPadding(WindowInsets.navigationBars)
-            ) {
-                NavigationBarItem(
-                    selected = true,
-                    onClick = { /* Already on main agenda page */ },
-                    icon = { Icon(Icons.Default.Person, contentDescription = "Agenda") },
-                    label = { Text("Agenda", fontWeight = FontWeight.Bold) }
-                )
-                NavigationBarItem(
-                    selected = false,
-                    onClick = {
-                        Toast.makeText(context, "Consultando todos os contatos salvos", Toast.LENGTH_SHORT).show()
-                    },
-                    icon = { Icon(Icons.Outlined.Refresh, contentDescription = "Recentes") },
-                    label = { Text("Recentes") }
-                )
-                NavigationBarItem(
-                    selected = false,
-                    onClick = {
-                        Toast.makeText(context, "ZapAgenda v1.2 - Design Minimalista M3", Toast.LENGTH_SHORT).show()
-                    },
-                    icon = { Icon(Icons.Outlined.Settings, contentDescription = "Ajustes") },
-                    label = { Text("Ajustes") }
-                )
+    // SharedPreferences settings storage for local configurations
+    val sharedPref = remember { context.getSharedPreferences("zap_agenda_prefs", Context.MODE_PRIVATE) }
+    var appThemePreset by remember { mutableStateOf(sharedPref.getString("app_theme_preset", "Royal Amethyst") ?: "Royal Amethyst") }
+    var notificationsEnabled by remember { mutableStateOf(sharedPref.getBoolean("notifications_enabled", true)) }
+    var appPassword by remember { mutableStateOf(sharedPref.getString("app_password", "") ?: "") }
+    
+    // Lock state on startup - if app password is not empty, start in a locked state
+    var isUnlocked by rememberSaveable(appPassword) { mutableStateOf(appPassword.isEmpty()) }
+    
+    var showSettingsDialog by remember { mutableStateOf(false) }
+
+    val darkTheme = isSystemInDarkTheme()
+    val ambientGradient = remember(darkTheme, appThemePreset) {
+        val darkThemeColors = when(appThemePreset) {
+            "Emerald WhatsApp" -> listOf(Color(0xFF071F11), Color(0xFF03140C), Color(0xFF0B171E))
+            "Sunset Gold" -> listOf(Color(0xFF1E140C), Color(0xFF281C0E), Color(0xFF1F0E16))
+            "Deep Sapphire" -> listOf(Color(0xFF05172E), Color(0xFF020C1B), Color(0xFF15082E))
+            "Cyber Silver" -> listOf(Color(0xFF1A1A1A), Color(0xFF111111), Color(0xFF17191C))
+            else -> listOf(Color(0xFF0F0A1C), Color(0xFF070F1E), Color(0xFF081A12)) // Royal Amethyst
+        }
+        val lightThemeColors = when(appThemePreset) {
+            "Emerald WhatsApp" -> listOf(Color(0xFFE9F5EF), Color(0xFFDCF8C6), Color(0xFFF1FDF6))
+            "Sunset Gold" -> listOf(Color(0xFFFDF5E6), Color(0xFFFFE4E1), Color(0xFFFAF0E6))
+            "Deep Sapphire" -> listOf(Color(0xFFE3F2FD), Color(0xFFE1F5FE), Color(0xFFECEFF1))
+            "Cyber Silver" -> listOf(Color(0xFFF0F2F5), Color(0xFFE9ECEF), Color(0xFFF8F9FA))
+            else -> listOf(Color(0xFFF1EEFA), Color(0xFFE8F1FC), Color(0xFFE9F4EE)) // Royal Amethyst
+        }
+        
+        Brush.verticalGradient(colors = if (darkTheme) darkThemeColors else lightThemeColors)
+    }
+
+    val themeAccentColors = remember(darkTheme, appThemePreset) {
+        if (darkTheme) {
+            when(appThemePreset) {
+                "Emerald WhatsApp" -> listOf(Color(0xFF25D366), Color(0xFF1EBF53))
+                "Sunset Gold" -> listOf(Color(0xFFFFB74D), Color(0xFFFFA726))
+                "Deep Sapphire" -> listOf(Color(0xFF4FC3F7), Color(0xFF29B6F6))
+                "Cyber Silver" -> listOf(Color(0xFFCFD8DC), Color(0xFFB0BEC5))
+                else -> listOf(Color(0xFFD0BCFF), Color(0xFF25D366)) // Purple & original secondary emerald Green
             }
-        },
-        floatingActionButton = {
-            FloatingActionButton(
-                onClick = {
-                    contactToEdit = null
-                    showAddDialog = true
-                },
-                containerColor = Color(0xFFD3E3FD), // Cool blue container from "Clean Minimalism"
-                contentColor = Color(0xFF001D35), // Dark text/icon color
-                shape = RoundedCornerShape(16.dp),
-                modifier = Modifier
-                    .testTag("add_contact_fab")
-                    .padding(bottom = 8.dp)
-            ) {
-                Icon(Icons.Default.Add, contentDescription = "Adicionar Contato")
+        } else {
+            when(appThemePreset) {
+                "Emerald WhatsApp" -> listOf(Color(0xFF128C7E), Color(0xFF25D366))
+                "Sunset Gold" -> listOf(Color(0xFFE07A5F), Color(0xFFF2CC8F))
+                "Deep Sapphire" -> listOf(Color(0xFF0077B6), Color(0xFF03045E))
+                "Cyber Silver" -> listOf(Color(0xFF37474F), Color(0xFF546E7A))
+                else -> listOf(Color(0xFF6750A4), Color(0xFF25D366)) // Royal Amethyst
             }
         }
-    ) { innerPadding ->
-        Column(
+    }
+
+    if (!isUnlocked) {
+        AppLockScreen(
+            correctPassword = appPassword,
+            onUnlock = { isUnlocked = true }
+        )
+    } else {
+        Box(
             modifier = Modifier
-                .padding(innerPadding)
                 .fillMaxSize()
-                .background(MaterialTheme.colorScheme.background)
+                .background(ambientGradient)
         ) {
+            Scaffold(
+                modifier = modifier.fillMaxSize(),
+                containerColor = Color.Transparent,
+                topBar = {
+                    CenterAlignedTopAppBar(
+                        title = {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(
+                                            Brush.linearGradient(
+                                                colors = themeAccentColors
+                                            )
+                                        ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Person,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(
+                                text = "ZapAgenda",
+                                fontWeight = FontWeight.ExtraBold,
+                                letterSpacing = 0.8.sp,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                style = MaterialTheme.typography.titleLarge
+                            )
+                        }
+                    },
+                    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                        containerColor = Color.Transparent
+                    )
+                )
+            },
+            bottomBar = {
+                val glassNavBg = if (darkTheme) Color(0x3D1D1B20) else Color(0xB8FFFFFF)
+                val glassBorderColor = Color.White.copy(alpha = if (darkTheme) 0.12f else 0.5f)
+                
+                NavigationBar(
+                    containerColor = glassNavBg,
+                    tonalElevation = 0.dp,
+                    modifier = Modifier
+                        .windowInsetsPadding(WindowInsets.navigationBars)
+                        .border(
+                            width = 1.dp,
+                            brush = Brush.verticalGradient(
+                                colors = listOf(glassBorderColor, Color.Transparent)
+                            ),
+                            shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
+                        )
+                        .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
+                ) {
+                    NavigationBarItem(
+                        selected = true,
+                        onClick = { /* Already on main agenda page */ },
+                        icon = { Icon(Icons.Default.Person, contentDescription = "Agenda") },
+                        label = { Text("Agenda", fontWeight = FontWeight.Bold) }
+                    )
+                    NavigationBarItem(
+                        selected = false,
+                        onClick = {
+                            Toast.makeText(context, "Consultando todos os contatos salvos", Toast.LENGTH_SHORT).show()
+                        },
+                        icon = { Icon(Icons.Outlined.Refresh, contentDescription = "Recentes") },
+                        label = { Text("Recentes") }
+                    )
+                    NavigationBarItem(
+                        selected = false,
+                        onClick = {
+                            showSettingsDialog = true
+                        },
+                        icon = { Icon(Icons.Outlined.Settings, contentDescription = "Ajustes") },
+                        label = { Text("Ajustes") }
+                    )
+                }
+            },
+            floatingActionButton = {
+                FloatingActionButton(
+                    onClick = {
+                        contactToEdit = null
+                        showAddDialog = true
+                    },
+                    containerColor = Color(0xFF25D366),
+                    contentColor = Color.White,
+                    shape = CircleShape,
+                    modifier = Modifier
+                        .testTag("add_contact_fab")
+                        .padding(bottom = 8.dp)
+                        .border(
+                            width = 1.dp,
+                            color = Color.White.copy(alpha = 0.35f),
+                            shape = CircleShape
+                        )
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = "Adicionar Contato")
+                }
+            }
+        ) { innerPadding ->
+            Column(
+                modifier = Modifier
+                    .padding(innerPadding)
+                    .fillMaxSize()
+                    .background(Color.Transparent)
+            ) {
             // Lupa & Search Bar Area
             SearchArea(
                 query = searchQuery,
@@ -229,6 +323,7 @@ fun ZapAgendaScreen(
             }
         }
     }
+}
 
     // Add / Edit Dialog Form
     if (showAddDialog) {
@@ -265,6 +360,34 @@ fun ZapAgendaScreen(
             }
         )
     }
+
+    if (showSettingsDialog) {
+        SettingsDialog(
+            currentTheme = appThemePreset,
+            onThemeChange = { newTheme ->
+                sharedPref.edit().putString("app_theme_preset", newTheme).apply()
+                appThemePreset = newTheme
+            },
+            notificationsEnabled = notificationsEnabled,
+            onNotificationsToggle = { enabled ->
+                sharedPref.edit().putBoolean("notifications_enabled", enabled).apply()
+                notificationsEnabled = enabled
+                val msg = if (enabled) "Notificações ativadas!" else "Notificações desativadas!"
+                Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+            },
+            appPassword = appPassword,
+            onPasswordSave = { newPass ->
+                sharedPref.edit().putString("app_password", newPass).apply()
+                appPassword = newPass
+                val msg = if (newPass.isEmpty()) "Senha de bloqueio removida!" else "Nova senha registrada!"
+                Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+            },
+            contactsList = contacts,
+            viewModel = viewModel,
+            onDismiss = { showSettingsDialog = false }
+        )
+    }
+}
 }
 
 @Composable
@@ -275,18 +398,24 @@ fun SearchArea(
     totalCount: Int,
     modifier: Modifier = Modifier
 ) {
+    val darkTheme = isSystemInDarkTheme()
     Column(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 12.dp)
     ) {
-        // High fidelity capsule matching "flex items-center bg-[#f3edf7] h-14 px-4 rounded-full shadow-sm"
+        // High fidelity glassy capsule matching polished floating glass panels
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(56.dp)
                 .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.8f))
+                .background(if (darkTheme) Color(0x35191622) else Color(0xC7FFFFFF))
+                .border(
+                    width = 1.dp,
+                    color = Color.White.copy(alpha = if (darkTheme) 0.12f else 0.55f),
+                    shape = CircleShape
+                )
                 .padding(horizontal = 16.dp),
             contentAlignment = Alignment.CenterStart
         ) {
@@ -336,19 +465,32 @@ fun SearchArea(
                         }
                     }
                 )
-
-                // Personal branding avatar matching "w-10 h-10 rounded-full bg-[#6750a4]"
+                
+                // Personal branding avatar with high-end premium gradient branding
                 Box(
                     modifier = Modifier
                         .size(38.dp)
                         .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.primary),
+                        .background(
+                            Brush.linearGradient(
+                                colors = if (darkTheme) {
+                                    listOf(Color(0xFFD0BCFF), Color(0xFF1EBF53))
+                                } else {
+                                    listOf(Color(0xFF6750A4), Color(0xFF25D366))
+                                }
+                            )
+                        )
+                        .border(
+                            width = 1.dp,
+                            color = Color.White.copy(alpha = 0.35f),
+                            shape = CircleShape
+                        ),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
                         text = "SV", // Silmar Vargas
                         fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
+                        fontWeight = FontWeight.ExtraBold,
                         color = Color.White
                     )
                 }
@@ -416,20 +558,33 @@ fun ContactCard(
 ) {
     val initial = contact.name.trim().firstOrNull()?.uppercase() ?: "?"
     val colorPair = getInitialColors(contact.name.firstOrNull() ?: ' ')
+    val darkTheme = isSystemInDarkTheme()
 
-    ElevatedCard(
+    // Premium Glass Color Specs for light and dark environments
+    val glassBgColor = if (isSelected) {
+        if (darkTheme) Color(0x664F378B) else Color(0x66EADDFF)
+    } else {
+        if (darkTheme) Color(0x33100E17) else Color(0xA1FFFFFF)
+    }
+    
+    val glassBorderColor = if (isSelected) {
+        if (darkTheme) Color(0xAA9F87DF) else Color(0xAA6750A4)
+    } else {
+        Color.White.copy(alpha = if (darkTheme) 0.12f else 0.55f)
+    }
+
+    Card(
         modifier = modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
+            .border(
+                width = 1.dp,
+                color = glassBorderColor,
+                shape = RoundedCornerShape(22.dp)
+            )
             .testTag("contact_item_card_${contact.id}"),
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = if (isSelected) {
-                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
-            } else {
-                MaterialTheme.colorScheme.surface
-            }
-        ),
-        shape = RoundedCornerShape(20.dp) // Beautiful rounded-2xl look
+        colors = CardDefaults.cardColors(containerColor = glassBgColor),
+        shape = RoundedCornerShape(22.dp)
     ) {
         Row(
             modifier = Modifier
@@ -442,18 +597,27 @@ fun ContactCard(
                 modifier = Modifier.weight(1f),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Alternating color avatar with depth and modern style
+                // High-End avatar bubble with gradient details and customized light stroke
                 Box(
                     modifier = Modifier
-                        .size(48.dp) // Perfect w-12 h-12 in design
+                        .size(50.dp) // Perfect proportions
                         .clip(CircleShape)
-                        .background(colorPair.first),
+                        .background(
+                            Brush.linearGradient(
+                                colors = listOf(colorPair.first, colorPair.first.copy(alpha = 0.6f))
+                            )
+                        )
+                        .border(
+                            width = 1.dp,
+                            color = colorPair.second.copy(alpha = 0.25f),
+                            shape = CircleShape
+                        ),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
                         text = initial,
                         fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
+                        fontWeight = FontWeight.ExtraBold,
                         color = colorPair.second
                     )
                 }
@@ -477,7 +641,7 @@ fun ContactCard(
                     )
                     
                     if (contact.bank.isNotEmpty() || contact.pixKey.isNotEmpty()) {
-                        Spacer(modifier = Modifier.height(4.dp))
+                        Spacer(modifier = Modifier.height(6.dp))
                         Row(
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
                             verticalAlignment = Alignment.CenterVertically
@@ -485,30 +649,44 @@ fun ContactCard(
                             if (contact.bank.isNotEmpty()) {
                                 Box(
                                     modifier = Modifier
-                                        .clip(RoundedCornerShape(6.dp))
-                                        .background(MaterialTheme.colorScheme.primaryContainer)
-                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(
+                                            if (darkTheme) Color(0x3D1EBF53) else Color(0x2425D366)
+                                        )
+                                        .border(
+                                            width = 1.dp,
+                                            color = (if (darkTheme) Color(0xFF1EBF53) else Color(0xFF128C7E)).copy(alpha = 0.3f),
+                                            shape = RoundedCornerShape(8.dp)
+                                        )
+                                        .padding(horizontal = 8.dp, vertical = 3.dp)
                                 ) {
                                     Text(
                                         text = contact.bank,
                                         fontSize = 10.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                                        color = if (darkTheme) Color(0xFFEADDFF) else MaterialTheme.colorScheme.primary
                                     )
                                 }
                             }
                             if (contact.pixKey.isNotEmpty()) {
                                 Box(
                                     modifier = Modifier
-                                        .clip(RoundedCornerShape(6.dp))
-                                        .background(Color(0xFFDCF8C6))
-                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(
+                                            if (darkTheme) Color(0x2B1D1B20) else Color(0xCCDCF8C6)
+                                        )
+                                        .border(
+                                            width = 1.dp,
+                                            color = Color(0xFF075E54).copy(alpha = 0.25f),
+                                            shape = RoundedCornerShape(8.dp)
+                                        )
+                                        .padding(horizontal = 8.dp, vertical = 3.dp)
                                 ) {
                                     Text(
                                         text = "Pix: ${contact.pixKey}",
                                         fontSize = 10.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = Color(0xFF075E54),
+                                        color = if (darkTheme) Color(0xFF81C784) else Color(0xFF075E54),
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
@@ -530,22 +708,31 @@ fun ContactCard(
                 }
             }
 
-            // Quick send WhatsApp trigger matching the gorgeous emerald bubble styling:bg-[#dcf8c6] text-[#075e54]
+            // Quick send WhatsApp trigger - polished glowing emerald/green gradient bubble
             Box(
                 modifier = Modifier
                     .size(44.dp)
                     .clip(CircleShape)
-                    .background(Color(0xFFDCF8C6)) // Retro conver green background
+                    .background(
+                        Brush.linearGradient(
+                            colors = listOf(Color(0xFF25D366), Color(0xFF128C7E))
+                        )
+                    )
                     .clickable(onClick = onQuickWhatsApp)
+                    .border(
+                        width = 1.dp,
+                        color = Color.White.copy(alpha = 0.4f),
+                        shape = CircleShape
+                    )
                     .testTag("quick_whatsapp_${contact.id}"),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.Send,
                     contentDescription = "Zapear Rápido",
-                    tint = Color(0xFF075E54), // Deep retro teal text color
+                    tint = Color.White,
                     modifier = Modifier
-                        .size(18.dp)
+                        .size(16.dp)
                         .offset(x = 1.dp) // Subtle aesthetic alignment offset
                 )
             }
@@ -638,15 +825,26 @@ fun ContactDetailsSheet(
         ) 
     }
 
+    val darkTheme = isSystemInDarkTheme()
+    val glassBg = if (darkTheme) Color(0xF2161224) else Color(0xEDF7F5FC)
+    val glassLine = Color.White.copy(alpha = if (darkTheme) 0.15f else 0.55f)
+
     Card(
         modifier = modifier
             .fillMaxWidth()
+            .border(
+                width = 1.dp,
+                brush = Brush.verticalGradient(
+                    colors = listOf(glassLine, Color.Transparent)
+                ),
+                shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
+            )
             .testTag("contact_detail_panel"),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant
+            containerColor = glassBg
         ),
         shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 16.dp)
     ) {
         Column(
             modifier = Modifier
@@ -662,15 +860,15 @@ fun ContactDetailsSheet(
                 Text(
                     text = "Consulta de Contato",
                     style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary
+                    fontWeight = FontWeight.ExtraBold,
+                    color = if (darkTheme) Color(0xFFD0BCFF) else MaterialTheme.colorScheme.primary
                 )
                 Row {
                     IconButton(onClick = onEdit) {
                         Icon(
                             imageVector = Icons.Default.Edit,
                             contentDescription = "Editar",
-                            tint = MaterialTheme.colorScheme.primary
+                            tint = if (darkTheme) Color(0xFFD0BCFF) else MaterialTheme.colorScheme.primary
                         )
                     }
                     IconButton(onClick = onDelete) {
@@ -695,7 +893,7 @@ fun ContactDetailsSheet(
             Text(
                 text = contact.name,
                 fontSize = 22.sp,
-                fontWeight = FontWeight.Bold,
+                fontWeight = FontWeight.ExtraBold,
                 color = MaterialTheme.colorScheme.onSurface
             )
             Spacer(modifier = Modifier.height(4.dp))
@@ -704,13 +902,13 @@ fun ContactDetailsSheet(
                     imageVector = Icons.Default.Phone,
                     contentDescription = "Telefone",
                     modifier = Modifier.size(14.dp),
-                    tint = MaterialTheme.colorScheme.primary
+                    tint = if (darkTheme) Color(0xFFD0BCFF) else MaterialTheme.colorScheme.primary
                 )
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = contact.phoneNumber,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                     text = contact.phoneNumber,
+                     style = MaterialTheme.typography.bodyMedium,
+                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 if (contact.email.isNotEmpty()) {
                     Spacer(modifier = Modifier.width(16.dp))
@@ -718,7 +916,7 @@ fun ContactDetailsSheet(
                         imageVector = Icons.Default.Email,
                         contentDescription = "E-mail",
                         modifier = Modifier.size(14.dp),
-                        tint = MaterialTheme.colorScheme.primary
+                        tint = if (darkTheme) Color(0xFFD0BCFF) else MaterialTheme.colorScheme.primary
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
@@ -731,7 +929,7 @@ fun ContactDetailsSheet(
                 }
             }
 
-            // Bancos & Pix Visual Cards
+            // Bancos & Pix Visual Cards styled with beautiful glassy outline borders
             if (contact.bank.isNotEmpty() || contact.pixKey.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(12.dp))
                 Row(
@@ -740,21 +938,27 @@ fun ContactDetailsSheet(
                 ) {
                     if (contact.bank.isNotEmpty()) {
                         Card(
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier
+                                .weight(1f)
+                                .border(
+                                    width = 1.dp,
+                                    color = Color.White.copy(alpha = if (darkTheme) 0.12f else 0.45f),
+                                    shape = RoundedCornerShape(16.dp)
+                                ),
                             colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.7f)
+                                containerColor = if (darkTheme) Color(0x33100E17) else Color(0x99FFFFFF)
                             ),
-                            shape = RoundedCornerShape(12.dp)
+                            shape = RoundedCornerShape(16.dp)
                         ) {
-                            Column(modifier = Modifier.padding(10.dp)) {
+                            Column(modifier = Modifier.padding(12.dp)) {
                                 Text(
                                     text = "BANCO",
                                     fontSize = 9.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    letterSpacing = 0.5.sp,
-                                    color = MaterialTheme.colorScheme.primary
+                                    fontWeight = FontWeight.ExtraBold,
+                                    letterSpacing = 0.8.sp,
+                                    color = if (darkTheme) Color(0xFFD0BCFF) else MaterialTheme.colorScheme.primary
                                 )
-                                Spacer(modifier = Modifier.height(2.dp))
+                                Spacer(modifier = Modifier.height(4.dp))
                                 Text(
                                     text = contact.bank,
                                     fontSize = 15.sp,
@@ -767,16 +971,22 @@ fun ContactDetailsSheet(
 
                     if (contact.pixKey.isNotEmpty()) {
                         Card(
-                            modifier = Modifier.weight(1.3f),
+                            modifier = Modifier
+                                .weight(1.3f)
+                                .border(
+                                    width = 1.dp,
+                                    color = Color.White.copy(alpha = if (darkTheme) 0.12f else 0.45f),
+                                    shape = RoundedCornerShape(16.dp)
+                                ),
                             colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.7f)
+                                containerColor = if (darkTheme) Color(0x33100E17) else Color(0x99FFFFFF)
                             ),
-                            shape = RoundedCornerShape(12.dp)
+                            shape = RoundedCornerShape(16.dp)
                         ) {
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(start = 10.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                                    .padding(start = 12.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
@@ -784,11 +994,11 @@ fun ContactDetailsSheet(
                                     Text(
                                         text = "CHAVE PIX",
                                         fontSize = 9.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        letterSpacing = 0.5.sp,
-                                        color = MaterialTheme.colorScheme.primary
+                                        fontWeight = FontWeight.ExtraBold,
+                                        letterSpacing = 0.8.sp,
+                                        color = if (darkTheme) Color(0xFF1EBF53) else Color(0xFF075E54)
                                     )
-                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Spacer(modifier = Modifier.height(4.dp))
                                     Text(
                                         text = contact.pixKey,
                                         fontSize = 14.sp,
@@ -805,12 +1015,12 @@ fun ContactDetailsSheet(
                                         clipboard.setPrimaryClip(clip)
                                         Toast.makeText(context, "Chave Pix copiada!", Toast.LENGTH_SHORT).show()
                                     },
-                                    modifier = Modifier.size(32.dp)
+                                    modifier = Modifier.size(36.dp)
                                 ) {
                                     Icon(
                                         imageVector = Icons.Default.Share,
                                         contentDescription = "Copiar Pix",
-                                        tint = MaterialTheme.colorScheme.primary,
+                                        tint = if (darkTheme) Color(0xFF1EBF53) else Color(0xFF075E54),
                                         modifier = Modifier.size(16.dp)
                                     )
                                 }
@@ -823,10 +1033,17 @@ fun ContactDetailsSheet(
             if (contact.notes.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(8.dp))
                 Card(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(
+                            width = 1.dp,
+                            color = Color.White.copy(alpha = if (darkTheme) 0.08f else 0.35f),
+                            shape = RoundedCornerShape(12.dp)
+                        ),
                     colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f)
-                    )
+                        containerColor = if (darkTheme) Color(0x1F100E17) else Color(0x66FFFFFF)
+                    ),
+                    shape = RoundedCornerShape(12.dp)
                 ) {
                     Text(
                         text = contact.notes,
@@ -843,7 +1060,7 @@ fun ContactDetailsSheet(
             Text(
                 text = "Mensagem para o WhatsApp:",
                 style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.Bold,
+                fontWeight = FontWeight.ExtraBold,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Spacer(modifier = Modifier.height(6.dp))
@@ -880,8 +1097,8 @@ fun ContactDetailsSheet(
                     .testTag("whatsapp_message_input"),
                 placeholder = { Text("Mensagem personalizada...") },
                 colors = OutlinedTextFieldDefaults.colors(
-                    focusedContainerColor = MaterialTheme.colorScheme.surface,
-                    unfocusedContainerColor = MaterialTheme.colorScheme.surface
+                    focusedContainerColor = if (darkTheme) Color(0x33100E17) else Color(0x99FFFFFF),
+                    unfocusedContainerColor = if (darkTheme) Color(0x33100E17) else Color(0x99FFFFFF)
                 ),
                 maxLines = 3
             )
@@ -894,6 +1111,11 @@ fun ContactDetailsSheet(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(52.dp)
+                    .border(
+                        width = 1.dp,
+                        color = Color.White.copy(alpha = 0.35f),
+                        shape = RoundedCornerShape(12.dp)
+                    )
                     .testTag("send_whatsapp_button"),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = Color(0xFF25D366),
@@ -933,17 +1155,26 @@ fun AddEditContactDialog(
     var nameError by remember { mutableStateOf(false) }
     var phoneError by remember { mutableStateOf(false) }
 
+    val darkTheme = isSystemInDarkTheme()
+    val glassBg = if (darkTheme) Color(0xF21C1824) else Color(0xF2FCFAFF)
+    val glassBorder = Color.White.copy(alpha = if (darkTheme) 0.15f else 0.45f)
+
     Dialog(onDismissRequest = onDismiss) {
         Card(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(8.dp)
+                .padding(4.dp)
+                .border(
+                    width = 1.dp,
+                    color = glassBorder,
+                    shape = RoundedCornerShape(28.dp)
+                )
                 .testTag("add_edit_dialog"),
             shape = RoundedCornerShape(28.dp),
             colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surface
+                containerColor = glassBg
             ),
-            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+            elevation = CardDefaults.cardElevation(defaultElevation = 16.dp)
         ) {
             val scrollState = rememberScrollState()
             Column(
@@ -956,8 +1187,8 @@ fun AddEditContactDialog(
                 Text(
                     text = if (contact == null) "Novo Contato" else "Editar Contato",
                     style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary
+                    fontWeight = FontWeight.ExtraBold,
+                    color = if (darkTheme) Color(0xFFD0BCFF) else MaterialTheme.colorScheme.primary
                 )
 
                 // Name Input
@@ -1090,4 +1321,544 @@ fun AddEditContactDialog(
             }
         }
     }
+}
+
+@Composable
+fun SettingsDialog(
+    currentTheme: String,
+    onThemeChange: (String) -> Unit,
+    notificationsEnabled: Boolean,
+    onNotificationsToggle: (Boolean) -> Unit,
+    appPassword: String,
+    onPasswordSave: (String) -> Unit,
+    contactsList: List<Contact>,
+    viewModel: ContactViewModel,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    val clipboardManager = LocalClipboardManager.current
+    val darkTheme = isSystemInDarkTheme()
+    
+    val glassBg = if (darkTheme) Color(0xF2161224) else Color(0xEDF7F5FC)
+    val glassBorder = Color.White.copy(alpha = if (darkTheme) 0.15f else 0.45f)
+    
+    val sharedPref = remember { context.getSharedPreferences("zap_agenda_prefs", Context.MODE_PRIVATE) }
+    var localBackupTime by remember { mutableStateOf(sharedPref.getString("local_backup_data_time", "") ?: "") }
+    
+    var tempPassword by remember { mutableStateOf(appPassword) }
+    var importText by remember { mutableStateOf("") }
+    
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(4.dp)
+                .border(
+                    width = 1.dp,
+                    color = glassBorder,
+                    shape = RoundedCornerShape(28.dp)
+                )
+                .testTag("settings_dialog_panel"),
+            shape = RoundedCornerShape(28.dp),
+            colors = CardDefaults.cardColors(containerColor = glassBg),
+            elevation = CardDefaults.cardElevation(defaultElevation = 16.dp)
+        ) {
+            val scrollState = rememberScrollState()
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(scrollState)
+                    .padding(24.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Color(0xFF25D366).copy(alpha = 0.15f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Settings,
+                                contentDescription = null,
+                                tint = Color(0xFF25D366)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text(
+                            text = "Ajustes Gerais",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Default.Close, contentDescription = "Fechar")
+                    }
+                }
+                
+                HorizontalDivider(color = Color.White.copy(alpha = 0.1f))
+                
+                // 1. Theme and color preset selector
+                Text(
+                    text = "Aparência e Cores",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                
+                val themesList = listOf("Royal Amethyst", "Emerald WhatsApp", "Sunset Gold", "Deep Sapphire", "Cyber Silver")
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    themesList.forEach { theme ->
+                        val themeColor = when(theme) {
+                            "Emerald WhatsApp" -> Color(0xFF25D366)
+                            "Sunset Gold" -> Color(0xFFFFB74D)
+                            "Deep Sapphire" -> Color(0xFF4FC3F7)
+                            "Cyber Silver" -> Color(0xFFCFD8DC)
+                            else -> Color(0xFF6750A4)
+                        }
+                        
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .background(themeColor)
+                                .clickable { onThemeChange(theme) }
+                                .border(
+                                    width = if (currentTheme == theme) 3.dp else 1.dp,
+                                    color = if (currentTheme == theme) {
+                                        if (darkTheme) Color.White else Color.Black
+                                    } else Color.White.copy(alpha = 0.3f),
+                                    shape = CircleShape
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (currentTheme == theme) {
+                                Icon(
+                                    imageVector = Icons.Default.Check,
+                                    contentDescription = "Selecionado",
+                                    tint = if (theme == "Cyber Silver") Color.Black else Color.White,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+                Text(
+                    text = "Tema ativo: $currentTheme",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                
+                HorizontalDivider(color = Color.White.copy(alpha = 0.1f))
+                
+                // 2. Notifications Config
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Lembretes Locais",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "Receba lembretes locais para realizar backups da rotina",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = notificationsEnabled,
+                        onCheckedChange = onNotificationsToggle,
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color(0xFF25D366),
+                            checkedTrackColor = Color(0xFF25D366).copy(alpha = 0.4f)
+                        )
+                    )
+                }
+                
+                HorizontalDivider(color = Color.White.copy(alpha = 0.1f))
+                
+                // 3. Local offline backup persistence (salvar dados localmente backup)
+                Text(
+                    text = "Backup Interno Offline",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (darkTheme) Color(0x1F100E17) else Color(0x66FFFFFF)
+                    ),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Text(
+                            text = "Ponto de Restauração",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = if (localBackupTime.isNotEmpty()) {
+                                "Último backup: $localBackupTime"
+                            } else {
+                                "Nenhum backup local salvo ainda."
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Button(
+                                onClick = {
+                                    val backupJson = exportToJSON(contactsList)
+                                    val now = java.text.SimpleDateFormat("dd/MM/yyyy HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())
+                                    sharedPref.edit()
+                                        .putString("local_backup_data", backupJson)
+                                        .putString("local_backup_data_time", now)
+                                        .apply()
+                                    localBackupTime = now
+                                    Toast.makeText(context, "Backup local criado com sucesso!", Toast.LENGTH_SHORT).show()
+                                },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
+                            ) {
+                                Text("Criar Backup", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+                            
+                            Button(
+                                onClick = {
+                                    val backupJson = sharedPref.getString("local_backup_data", "") ?: ""
+                                    if (backupJson.isNotEmpty()) {
+                                        try {
+                                            val count = importFromJSON(backupJson, viewModel)
+                                            Toast.makeText(context, "$count contatos restaurados com sucesso!", Toast.LENGTH_SHORT).show()
+                                        } catch (e: Exception) {
+                                            Toast.makeText(context, "Falha ao restaurar backup local.", Toast.LENGTH_SHORT).show()
+                                        }
+                                    } else {
+                                        Toast.makeText(context, "Não há backup para restaurar.", Toast.LENGTH_SHORT).show()
+                                    }
+                                },
+                                enabled = localBackupTime.isNotEmpty(),
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF25D366))
+                            ) {
+                                Text("Restaurar", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                            }
+                        }
+                    }
+                }
+                
+                HorizontalDivider(color = Color.White.copy(alpha = 0.1f))
+                
+                // 4. Import / Export Backup with quick copy transfer
+                Text(
+                    text = "Importar / Exportar Backup",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Text(
+                    text = "Arraste de outros aparelhos copiando e colando a representação estruturada de cópia de segurança.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                
+                Button(
+                    onClick = {
+                        val backupStr = exportToJSON(contactsList)
+                        clipboardManager.setText(AnnotatedString(backupStr))
+                        Toast.makeText(context, "Código de backup copiado para área de transferência!", Toast.LENGTH_SHORT).show()
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
+                ) {
+                    Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Exportar (Copiar Código para Área)", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+                
+                Spacer(modifier = Modifier.height(4.dp))
+                
+                OutlinedTextField(
+                    value = importText,
+                    onValueChange = { importText = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Código de Importação JSON") },
+                    placeholder = { Text("Cole o objeto JSON aqui...") },
+                    maxLines = 4
+                )
+                
+                Button(
+                    onClick = {
+                        try {
+                            val count = importFromJSON(importText, viewModel)
+                            if (count > 0) {
+                                Toast.makeText(context, "$count contatos importados com sucesso!", Toast.LENGTH_SHORT).show()
+                                importText = ""
+                            } else {
+                                Toast.makeText(context, "Nenhum contato válido encontrado no código.", Toast.LENGTH_SHORT).show()
+                            }
+                        } catch (e: Exception) {
+                            Toast.makeText(context, "Formato inválido. Verifique o código e tente de novo.", Toast.LENGTH_LONG).show()
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = importText.isNotBlank(),
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF25D366))
+                ) {
+                    Text("Processar & Restaurar Backup colado", fontWeight = FontWeight.Bold)
+                }
+                
+                HorizontalDivider(color = Color.White.copy(alpha = 0.1f))
+                
+                // 5. Access control password settings (colocar senha no aplicativo)
+                Text(
+                    text = "Acesso de Segurança",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Text(
+                    text = "Defina uma senha numérica ou string para bloquear sua agenda na entrada do app.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                
+                OutlinedTextField(
+                    value = tempPassword,
+                    onValueChange = { tempPassword = it },
+                    modifier = Modifier.fillMaxWidth().testTag("settings_password_form_input"),
+                    label = { Text("Senha do Aplicativo") },
+                    placeholder = { Text("Preencha para bloquear ou limpe para remover") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password)
+                )
+                
+                Button(
+                    onClick = {
+                        onPasswordSave(tempPassword.trim())
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                ) {
+                    Text("Salvar Configurações de Senha", fontWeight = FontWeight.Bold)
+                }
+                
+                HorizontalDivider(color = Color.White.copy(alpha = 0.1f))
+                
+                // 6. DEVELOPER COPYRIGHT CREDITS
+                Text(
+                    text = "Copyright © 2026 ZapAgenda • desenvolvido por khallen",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.61f),
+                    textAlign = TextAlign.Center,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.fillMaxWidth().padding(top = 10.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun AppLockScreen(
+    correctPassword: String,
+    onUnlock: () -> Unit
+) {
+    var passwordInput by remember { mutableStateOf("") }
+    var isError by remember { mutableStateOf(false) }
+    val darkTheme = isSystemInDarkTheme()
+    
+    val lockGradient = remember(darkTheme) {
+        if (darkTheme) {
+            Brush.verticalGradient(
+                colors = listOf(Color(0xFF130E22), Color(0xFF0B1426), Color(0xFF09121E))
+            )
+        } else {
+            Brush.verticalGradient(
+                colors = listOf(Color(0xFFE8E5F3), Color(0xFFD6E4F6), Color(0xFFD9EADB))
+            )
+        }
+    }
+    
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(lockGradient),
+        contentAlignment = Alignment.Center
+    ) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth(0.9f)
+                .padding(16.dp)
+                .border(
+                    width = 1.dp,
+                    color = Color.White.copy(alpha = if (darkTheme) 0.15f else 0.5f),
+                    shape = RoundedCornerShape(24.dp)
+                ),
+            shape = RoundedCornerShape(24.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = if (darkTheme) Color(0x731C182A) else Color(0xD8FFFFFF)
+            ),
+            elevation = CardDefaults.cardElevation(defaultElevation = 16.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(28.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(64.dp)
+                        .clip(CircleShape)
+                        .background(
+                            Brush.linearGradient(
+                                colors = listOf(Color(0xFF25D366), Color(0xFF128C7E))
+                            )
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Lock,
+                        contentDescription = "App Bloqueado",
+                        tint = Color.White,
+                        modifier = Modifier.size(28.dp)
+                    )
+                }
+                
+                Text(
+                    text = "Acesso Restrito",
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                
+                Text(
+                    text = "Digite a senha de segurança para acessar o ZapAgenda.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    textAlign = TextAlign.Center,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                
+                OutlinedTextField(
+                    value = passwordInput,
+                    onValueChange = {
+                        passwordInput = it
+                        if (isError) isError = false
+                    },
+                    modifier = Modifier.fillMaxWidth().testTag("lock_password_input"),
+                    label = { Text("Senha do Aplicativo") },
+                    singleLine = true,
+                    isError = isError,
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    supportingText = {
+                        if (isError) {
+                            Text("Senha incorreta. Tente novamente.", color = MaterialTheme.colorScheme.error)
+                        }
+                    }
+                )
+                
+                Button(
+                    onClick = {
+                        if (passwordInput == correctPassword) {
+                            onUnlock()
+                        } else {
+                            isError = true
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp)
+                        .testTag("lock_unlock_button"),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF25D366),
+                        contentColor = Color.White
+                    )
+                ) {
+                    Text("Desbloquear", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                }
+            }
+        }
+    }
+}
+
+fun exportToJSON(contacts: List<Contact>): String {
+    try {
+        val array = org.json.JSONArray()
+        contacts.forEach { contact ->
+            val obj = org.json.JSONObject()
+            obj.put("name", contact.name)
+            obj.put("phoneNumber", contact.phoneNumber)
+            obj.put("email", contact.email)
+            obj.put("bank", contact.bank)
+            obj.put("pixKey", contact.pixKey)
+            obj.put("notes", contact.notes)
+            array.put(obj)
+        }
+        return array.toString(2)
+    } catch (e: Exception) {
+        return "[]"
+    }
+}
+
+fun importFromJSON(jsonStr: String, viewModel: ContactViewModel): Int {
+    if (jsonStr.isBlank()) return 0
+    var importedCount = 0
+    val array = org.json.JSONArray(jsonStr)
+    for (i in 0 until array.length()) {
+        val obj = array.getJSONObject(i)
+        val name = obj.optString("name", "")
+        val phone = obj.optString("phoneNumber", "")
+        if (name.isNotBlank() && phone.isNotBlank()) {
+            val email = obj.optString("email", "")
+            val bank = obj.optString("bank", "")
+            val pixKey = obj.optString("pixKey", "")
+            val notes = obj.optString("notes", "")
+            viewModel.insertContact(
+                Contact(
+                    name = name,
+                    phoneNumber = phone,
+                    email = email,
+                    bank = bank,
+                    pixKey = pixKey,
+                    notes = notes
+                )
+            )
+            importedCount++
+        }
+    }
+    return importedCount
 }
