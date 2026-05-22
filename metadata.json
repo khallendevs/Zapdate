@@ -1,0 +1,6 @@
+{
+  "name": "ZapAgenda",
+  "description": "Agenda inteligente com salvamento local de contatos e envio de mensagens rápido pelo WhatsApp.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
